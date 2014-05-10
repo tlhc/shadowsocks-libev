@@ -16,7 +16,6 @@
 
 #define NEW_SOCKET  "new_socket"
 #define FREE_SOCKET "free_socket"
-#define BUF_LEN 256
 
 static int open_local_socket(char *path)
 {
@@ -50,12 +49,13 @@ static int open_local_socket(char *path)
 
 int new_protected_socket()
 {
+    int ret;
     int fd = open_local_socket(NEW_SOCKET);
-    char buffer[BUF_LEN]
+    char buffer[4];
 
     while (1)
     {
-        int r = read(fd, buffer, BUF_LEN);
+        int r = read(fd, buffer, 4);
         if (r == -1)
         {
             if (errno == EINTR)
@@ -71,19 +71,21 @@ int new_protected_socket()
 
     close(fd);
 
-    return atoi(buffer);
+    ret = *((int*)buffer);
+
+    return ret;
 }
 
 void free_protected_socket(int fd)
 {
     int fd = open_local_socket(FREE_SOCKET);
 
-    char buffer[BUF_LEN]
-    sprintf(buffer, "%d", fd);
+    char buffer[4];
+    memcpy(buffer, &fd, 4);
 
     while (1)
     {
-        int r = write(fd, buffer, strlen(buffer));
+        int r = write(fd, buffer, 4);
         if (r == -1)
         {
             if (errno == EINTR)
