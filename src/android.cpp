@@ -17,10 +17,11 @@
 #define NEW_SOCKET  "new_socket"
 #define FREE_SOCKET "free_socket"
 
-static int open_local_socket(char *path)
+static int open_local_socket(const char *path)
 {
     struct sockaddr_un addr;
     socklen_t len;
+    int sk, err;
 
     /* use abstract name space for socket path */
     addr.sun_family = AF_LOCAL;
@@ -76,12 +77,12 @@ int new_protected_socket()
     return ret;
 }
 
-void free_protected_socket(int fd)
+void free_protected_socket(int socket)
 {
     int fd = open_local_socket(FREE_SOCKET);
 
     char buffer[4];
-    memcpy(buffer, &fd, 4);
+    memcpy(buffer, &socket, 4);
 
     while (1)
     {
