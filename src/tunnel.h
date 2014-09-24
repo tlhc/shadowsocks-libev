@@ -61,6 +61,7 @@ struct server
     struct server_ctx *send_ctx;
     struct remote *remote;
     ss_addr_t destaddr;
+    int idx;
 };
 
 struct remote_ctx

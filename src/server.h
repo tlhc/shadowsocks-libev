@@ -41,6 +41,7 @@ struct listen_ctx
     char *iface;
     asyncns_t *asyncns;
     struct sockaddr sock;
+    int idx;
 };
 
 struct server_ctx
@@ -65,6 +66,7 @@ struct server
     struct server_ctx *send_ctx;
     struct listen_ctx *listen_ctx;
     struct remote *remote;
+    int idx;
 };
 
 struct remote_ctx

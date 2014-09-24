@@ -133,13 +133,13 @@ struct enc_ctx
     cipher_ctx_t evp;
 };
 
-char* ss_encrypt_all(int buf_size, char *plaintext, ssize_t *len, int method);
-char* ss_decrypt_all(int buf_size, char *ciphertext, ssize_t *len, int method);
-char* ss_encrypt(int buf_size, char *plaintext, ssize_t *len, struct enc_ctx *ctx);
-char* ss_decrypt(int buf_size, char *ciphertext, ssize_t *len, struct enc_ctx *ctx);
-void enc_ctx_init(int method, struct enc_ctx *ctx, int enc);
-int enc_init(const char *pass, const char *method);
-int enc_get_iv_len(void);
+char* ss_encrypt_all(int buf_size, char *plaintext, ssize_t *len, int method, int idx);
+char* ss_decrypt_all(int buf_size, char *ciphertext, ssize_t *len, int method, int idx);
+char* ss_encrypt(int buf_size, char *plaintext, ssize_t *len, struct enc_ctx *ctx, int idx);
+char* ss_decrypt(int buf_size, char *ciphertext, ssize_t *len, struct enc_ctx *ctx, int idx);
+void enc_ctx_init(int method, struct enc_ctx *ctx, int enc, int idx);
+int enc_init(const char *pass, const char *method, int idx);
+int enc_get_iv_len(int idx);
 void cipher_context_release(cipher_ctx_t *evp);
 unsigned char *enc_md5(const unsigned char *d, size_t n, unsigned char *md);
 

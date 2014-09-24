@@ -189,7 +189,7 @@ static void server_recv_cb (EV_P_ ev_io *w, int revents)
         }
     }
 
-    remote->buf = ss_encrypt(BUF_SIZE, remote->buf, &r, server->e_ctx);
+    remote->buf = ss_encrypt(BUF_SIZE, remote->buf, &r, server->e_ctx, server->idx);
 
     if (remote->buf == NULL)
     {
@@ -347,7 +347,7 @@ static void remote_recv_cb (EV_P_ ev_io *w, int revents)
         }
     }
 
-    server->buf = ss_decrypt(BUF_SIZE, server->buf, &r, server->d_ctx);
+    server->buf = ss_decrypt(BUF_SIZE, server->buf, &r, server->d_ctx, server->idx);
 
     if (server->buf == NULL)
     {
@@ -421,7 +421,7 @@ static void remote_send_cb (EV_P_ ev_io *w, int revents)
             memcpy(ss_addr_to_send + addr_len, &port, 2);
             addr_len += 2;
 
-            ss_addr_to_send = ss_encrypt(BUF_SIZE, ss_addr_to_send, &addr_len, server->e_ctx);
+            ss_addr_to_send = ss_encrypt(BUF_SIZE, ss_addr_to_send, &addr_len, server->e_ctx, server->idx);
             if (ss_addr_to_send == NULL)
             {
                 LOGE("invalid password or cipher");
@@ -576,8 +576,8 @@ struct server* new_server(int fd, int method)
     {
         server->e_ctx = malloc(sizeof(struct enc_ctx));
         server->d_ctx = malloc(sizeof(struct enc_ctx));
-        enc_ctx_init(method, server->e_ctx, 1);
-        enc_ctx_init(method, server->d_ctx, 0);
+        enc_ctx_init(method, server->e_ctx, 1, server->idx);
+        enc_ctx_init(method, server->d_ctx, 0, server->idx);
     }
     else
     {
@@ -822,7 +822,8 @@ int main (int argc, char **argv)
 
     // Setup keys
     LOGD("initialize ciphers... %s", method);
-    int m = enc_init(password, method);
+    //! TODO modify
+    int m = enc_init(password, method, 0);
 
     // Setup socket
     int listenfd;

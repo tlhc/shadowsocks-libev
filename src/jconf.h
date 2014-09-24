@@ -24,7 +24,7 @@
 
 #define MAX_REMOTE_NUM 10
 #define MAX_CONF_SIZE 16 * 1024
-#define DNS_THREAD_NUM 4
+#define DNS_THREAD_NUM 32
 #define MAX_UDP_CONN_NUM 4096
 
 typedef struct
@@ -48,6 +48,7 @@ typedef struct
 } jconf_t;
 
 jconf_t *read_jconf(const char* file);
+jconf_t *read_server_jconf(const char* file, int *num);
 void parse_addr(const char *str, ss_addr_t *addr);
 void free_addr(ss_addr_t *addr);
 

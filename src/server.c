@@ -199,6 +199,7 @@ struct remote *connect_to_remote(struct addrinfo *res, const char *iface)
 
 static void server_recv_cb (EV_P_ ev_io *w, int revents)
 {
+
     struct server_ctx *server_recv_ctx = (struct server_ctx *)w;
     struct server *server = server_recv_ctx->server;
     struct remote *remote = NULL;
@@ -249,7 +250,7 @@ static void server_recv_cb (EV_P_ ev_io *w, int revents)
     if (server->stage == 0)
     {
         r += server->buf_len;
-        if (r <= enc_get_iv_len())
+        if (r <= enc_get_iv_len(server->idx))
         {
             // wait for more
             if (verbose)
@@ -265,7 +266,7 @@ static void server_recv_cb (EV_P_ ev_io *w, int revents)
         }
     }
 
-    *buf = ss_decrypt(BUF_SIZE, *buf, &r, server->d_ctx);
+    *buf = ss_decrypt(BUF_SIZE, *buf, &r, server->d_ctx, server->idx);
 
     if (*buf == NULL)
     {
@@ -623,7 +624,7 @@ static void remote_recv_cb (EV_P_ ev_io *w, int revents)
         }
     }
 
-    server->buf = ss_encrypt(BUF_SIZE, server->buf, &r, server->e_ctx);
+    server->buf = ss_encrypt(BUF_SIZE, server->buf, &r, server->e_ctx, server->idx);
 
     if (server->buf == NULL)
     {
@@ -836,6 +837,7 @@ struct server* new_server(int fd, struct listen_ctx *listener)
     server->recv_ctx = malloc(sizeof(struct server_ctx));
     server->send_ctx = malloc(sizeof(struct server_ctx));
     server->fd = fd;
+    server->idx = listener->idx;
     ev_io_init(&server->recv_ctx->io, server_recv_cb, fd, EV_READ);
     ev_io_init(&server->send_ctx->io, server_send_cb, fd, EV_WRITE);
     ev_timer_init(&server->recv_ctx->watcher, server_timeout_cb, listener->timeout, listener->timeout * 5);
@@ -850,8 +852,8 @@ struct server* new_server(int fd, struct listen_ctx *listener)
     {
         server->e_ctx = malloc(sizeof(struct enc_ctx));
         server->d_ctx = malloc(sizeof(struct enc_ctx));
-        enc_ctx_init(listener->method, server->e_ctx, 1);
-        enc_ctx_init(listener->method, server->d_ctx, 0);
+        enc_ctx_init(listener->method, server->e_ctx, 1, server->idx);
+        enc_ctx_init(listener->method, server->d_ctx, 0, server->idx);
     }
     else
     {
@@ -955,8 +957,15 @@ int main (int argc, char **argv)
     char *iface = NULL;
 
     int server_num = 0;
+
     const char *server_host[MAX_REMOTE_NUM];
     const char *server_port = NULL;
+    int port_num = 0;
+    char **server_port_list = NULL;
+    char **password_list = NULL;
+    char **method_list = NULL;
+    char **timeout_list = NULL;
+
 
     int dns_thread_num = DNS_THREAD_NUM;
 
@@ -1034,7 +1043,8 @@ int main (int argc, char **argv)
 
     if (conf_path != NULL)
     {
-        jconf_t *conf = read_jconf(conf_path);
+        jconf_t *conf = read_server_jconf(conf_path, &port_num);
+
         if (server_num == 0)
         {
             server_num = conf->remote_num;
@@ -1043,10 +1053,27 @@ int main (int argc, char **argv)
                 server_host[i] = conf->remote_addr[i].host;
             }
         }
-        if (server_port == NULL) server_port = conf->remote_port;
-        if (password == NULL) password = conf->password;
-        if (method == NULL) method = conf->method;
-        if (timeout == NULL) timeout = conf->timeout;
+        if(port_num >= 1) {
+            LOGD("use server multi port password, server_port and password will be ignored ");
+
+            server_port_list = malloc(sizeof(char *) * port_num);
+            password_list = malloc(sizeof(char *) * port_num);
+            method_list = (malloc)(sizeof(char *) * port_num);
+            timeout_list = (malloc)(sizeof(char *) * port_num);
+
+            for(i = 0; i < port_num; i++) {
+                *(server_port_list + i) = (conf + i)->remote_port;
+                *(password_list + i) = (conf + i)->password;
+                *(method_list + i) = (conf + i)->method;
+                *(timeout_list + i) = (conf + i)->timeout;
+            }
+        } else {
+            if (server_port == NULL) server_port = conf->remote_port;
+            if (password == NULL) password = conf->password;
+            if (method == NULL) method = conf->method;
+            if (timeout == NULL) timeout = conf->timeout;
+        }
+
 #ifdef TCP_FASTOPEN
         if (fast_open == 0) fast_open = conf->fast_open;
 #endif
@@ -1067,13 +1094,22 @@ int main (int argc, char **argv)
 #endif
     }
 
-    if (server_num == 0 || server_port == NULL || password == NULL)
-    {
-        usage();
-        exit(EXIT_FAILURE);
+    if(port_num >= 1) {
+        if(server_port_list == NULL || method_list == NULL || password_list == NULL) {
+            printf("%s\n", "WTF.....");
+            exit(EXIT_FAILURE);
+        }
+    } else {
+        if (server_num == 0 || server_port == NULL || password == NULL) { 
+            usage();
+            exit(EXIT_FAILURE);
+        }
     }
 
-    if (timeout == NULL) timeout = "60";
+    //! TODO TIMEOUT process later
+    if (timeout == NULL) {
+        timeout = "60";
+    }
 
     if (pid_flags)
     {
@@ -1094,56 +1130,128 @@ int main (int argc, char **argv)
     }
 
     // setup keys
-    LOGD("initialize ciphers... %s", method);
-    int m = enc_init(password, method);
+
+    int m = 0;
+    int mlist[port_num];
+    memset(mlist, 0, sizeof(int) * port_num);
+    if(port_num >= 1) {
+        for(i = port_num - 1; i >= 0; i--) {
+            mlist[i] = enc_init(*(password_list + i), *(method_list + i), i);
+            //(void)(mlist);
+            LOGD("initialize ciphers... %s", *(method_list + i));
+        }
+    } else {
+        m = enc_init(password, method, 0);
+        LOGD("initialize ciphers... %s", method);
+    }
+
 
     // inilitialize ev loop
     struct ev_loop *loop = EV_DEFAULT;
-
-    // inilitialize listen context
-    struct listen_ctx listen_ctx_list[server_num + 1];
+    //struct listen_ctx listen_ctx_list[server_num + 1];
+    struct listen_ctx *listen_ctx_list = 
+        (struct listen_ctx *)malloc(sizeof(struct listen_ctx) * (server_num + 1));
+    if(listen_ctx_list == NULL) {
+        FATAL("listen_ctx bad malloc");
+        exit(EXIT_FAILURE);
+    }
+    memset(listen_ctx_list, 0, sizeof(struct listen_ctx) * (server_num + 1));
 
     // bind to each interface
-    while (server_num > 0)
-    {
-        int index = --server_num;
-        const char* host = server_host[index];
-
-        // Bind to port
-        int listenfd;
-        listenfd = create_and_bind(host, server_port);
-        if (listenfd < 0)
-        {
-            FATAL("bind() error..");
+    // inilitialize listen context
+    if(port_num >= 1) {
+        listen_ctx_list = (struct listen_ctx *)realloc(listen_ctx_list, 
+                sizeof(struct listen_ctx) * (port_num + 1));
+        if(listen_ctx_list == NULL) {
+            FATAL("listen_ctx bad realloc");
+            exit(EXIT_FAILURE);
         }
-        if (listen(listenfd, SOMAXCONN) == -1)
-        {
-            FATAL("listen() error.");
+        memset(listen_ctx_list, 0, sizeof(struct listen_ctx) * (port_num + 1));
+        while(port_num > 0) {
+            int index = --port_num;
+            const char *host = server_host[0];
+            int listenfd;
+            listenfd = create_and_bind(host, *(server_port_list + index));
+            if (listenfd < 0) {
+                FATAL("bind() error..");
+            }
+            if (listen(listenfd, SOMAXCONN) == -1) {
+                FATAL("listen() error.");
+            }
+            setnonblocking(listenfd);
+            LOGD("server listening at %s %s.", host, *(server_port_list + index));
+            //reverse to enc init, but it dosen't matter, all use the same method
+            struct listen_ctx *listen_ctx = &listen_ctx_list[index + 1];
+
+            // Setup proxy context
+            listen_ctx->timeout = atoi(*(timeout_list + index));
+            listen_ctx->asyncns = asyncns;
+            listen_ctx->fd = listenfd;
+            listen_ctx->method = mlist[index];
+            listen_ctx->iface = iface;
+
+            listen_ctx->idx = index;
+
+
+            ev_io_init (&listen_ctx->io, accept_cb, listenfd, EV_READ);
+            ev_io_start (loop, &listen_ctx->io);
+
         }
-        setnonblocking(listenfd);
-        LOGD("server listening at port %s.", server_port);
+    } else if(port_num < 1) {
+        //we will not use port_pass config
+        while (server_num > 0)
+        {
+            int index = --server_num;
+            const char* host = server_host[index];
 
-        struct listen_ctx *listen_ctx = &listen_ctx_list[index + 1];
+            // Bind to port
+            int listenfd;
+            listenfd = create_and_bind(host, server_port);
+            if (listenfd < 0)
+            {
+                FATAL("bind() error..");
+            }
+            if (listen(listenfd, SOMAXCONN) == -1)
+            {
+                FATAL("listen() error.");
+            }
+            setnonblocking(listenfd);
+            LOGD("server listening at port %s.", server_port);
 
-        // Setup proxy context
-        listen_ctx->timeout = atoi(timeout);
-        listen_ctx->asyncns = asyncns;
-        listen_ctx->fd = listenfd;
-        listen_ctx->method = m;
-        listen_ctx->iface = iface;
+            struct listen_ctx *listen_ctx = &listen_ctx_list[index + 1];
 
-        ev_io_init (&listen_ctx->io, accept_cb, listenfd, EV_READ);
-        ev_io_start (loop, &listen_ctx->io);
+            // Setup proxy context
+            listen_ctx->timeout = atoi(timeout);
+            listen_ctx->asyncns = asyncns;
+            listen_ctx->fd = listenfd;
+            listen_ctx->method = m;
+            listen_ctx->iface = iface;
+            
+            listen_ctx->idx = 0;
+
+            ev_io_init (&listen_ctx->io, accept_cb, listenfd, EV_READ);
+            ev_io_start (loop, &listen_ctx->io);
+        }
     }
-
     // initialize the DNS
     struct listen_ctx *listen_ctx = &listen_ctx_list[0];
     int asyncnsfd = asyncns_fd(asyncns);
-    listen_ctx->timeout = atoi(timeout);
+    if(timeout_list != NULL) {
+        listen_ctx->timeout = atoi(*(timeout_list));
+    } else {
+        listen_ctx->timeout = atoi(timeout);
+    }
     listen_ctx->asyncns = asyncns;
     listen_ctx->fd = asyncnsfd;
-    listen_ctx->method = m;
+    //all use same method
+    if(method_list != NULL) {
+        listen_ctx->method = mlist[0];
+    } else {
+        listen_ctx->method = m;
+    }
+
     listen_ctx->iface = iface;
+
     ev_io_init (&listen_ctx->io, server_resolve_cb, asyncnsfd, EV_READ);
     ev_io_start (loop, &listen_ctx->io);
 

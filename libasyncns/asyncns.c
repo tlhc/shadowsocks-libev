@@ -58,7 +58,7 @@
 #define MSG_NOSIGNAL 0
 #endif
 
-#define MAX_WORKERS 16
+#define MAX_WORKERS 32
 #define MAX_QUERIES 256
 #define BUFSIZE (10240)
 

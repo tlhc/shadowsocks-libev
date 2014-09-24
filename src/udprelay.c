@@ -524,7 +524,7 @@ static void remote_recv_cb (EV_P_ ev_io *w, int revents)
     }
 
 #ifdef UDPRELAY_LOCAL
-    buf = ss_decrypt_all(BUF_SIZE, buf, &buf_len, server_ctx->method);
+    buf = ss_decrypt_all(BUF_SIZE, buf, &buf_len, server_ctx->method, server_ctx->idx);
     if (buf == NULL)
     {
         if (verbose)
@@ -571,7 +571,7 @@ static void remote_recv_cb (EV_P_ ev_io *w, int revents)
     buf = tmpbuf;
     buf_len += addr_header_len;
 
-    buf = ss_encrypt_all(BUF_SIZE, buf, &buf_len, server_ctx->method);
+    buf = ss_encrypt_all(BUF_SIZE, buf, &buf_len, server_ctx->method, server_ctx->idx);
 #endif
 
     int s = sendto(server_ctx->fd, buf, buf_len, 0, &remote_ctx->src_addr, sizeof(remote_ctx->src_addr));
@@ -614,7 +614,7 @@ static void server_recv_cb (EV_P_ ev_io *w, int revents)
     }
 
 #ifdef UDPRELAY_REMOTE
-    buf = ss_decrypt_all(BUF_SIZE, buf, &buf_len, server_ctx->method);
+    buf = ss_decrypt_all(BUF_SIZE, buf, &buf_len, server_ctx->method, server_ctx->idx);
     if (buf == NULL)
     {
         if (verbose)
@@ -808,7 +808,7 @@ static void server_recv_cb (EV_P_ ev_io *w, int revents)
         memmove(buf, buf + offset, buf_len);
     }
 
-    buf = ss_encrypt_all(BUF_SIZE, buf, &buf_len, server_ctx->method);
+    buf = ss_encrypt_all(BUF_SIZE, buf, &buf_len, server_ctx->method, server_ctx->idx);
 
     int s = sendto(remote_ctx->fd, buf, buf_len, 0, &remote_ctx->dst_addr, sizeof(remote_ctx->dst_addr));
 

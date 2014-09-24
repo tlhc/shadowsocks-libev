@@ -199,3 +199,154 @@ jconf_t *read_jconf(const char* file)
     return &conf;
 
 }
+
+
+//for server.c
+jconf_t *read_server_jconf(const char* file, int *num)
+{
+    jconf_t *pconf = NULL;
+
+    pconf = (jconf_t *)malloc(sizeof(jconf_t));
+    if(pconf == NULL) {
+        FATAL("bad malloc when read config");
+        exit(-1);
+    }
+    memset(pconf, 0, sizeof(jconf_t));
+
+    char *buf;
+    json_value *obj;
+
+    FILE *f = fopen(file, "rb");
+    if (f == NULL) FATAL("Invalid config path.");
+
+    fseek(f, 0, SEEK_END);
+    long pos = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (pos >= MAX_CONF_SIZE) FATAL("Too large config file.");
+
+    buf = malloc(pos + 1);
+    if (buf == NULL) FATAL("No enough memory.");
+
+    int nread = fread(buf, pos, 1, f);
+    if (!nread) FATAL("Failed to read the config file.");
+    fclose(f);
+
+    buf[pos] = '\0'; // end of string
+
+    json_settings settings = { 0 };
+    char error_buf[512];
+    obj = json_parse_ex(&settings, buf, pos, error_buf);
+
+    if (obj == NULL)
+    {
+        FATAL(error_buf);
+    }
+
+    int port_num = 0;
+    if (obj->type == json_object)
+    {
+        int i, j, cnt;
+        for(i = 0; i < obj->u.object.length; i++) {
+            char *name = obj->u.object.values[i].name;
+            if(strcmp(name, "port_password") == 0) {
+                json_value *value = obj->u.object.values[i].value;
+                port_num = value->u.object.length;
+                break;
+            }
+        }
+        if(port_num >= 1) {
+            *num = port_num;
+            pconf = (jconf_t *)realloc(pconf, sizeof(jconf_t) * port_num);
+            if(pconf == NULL) {
+                FATAL("read conf bad malloc");
+                exit(-1);
+            }
+            memset(pconf, 0, sizeof(jconf_t) * port_num);
+        } else {
+            *num = 0;
+            port_num = 1;
+        }
+
+        for(cnt = 0; cnt < port_num; cnt++) {
+            for (i = 0; i < obj->u.object.length; i++) {
+                char *name = obj->u.object.values[i].name;
+                json_value *value = obj->u.object.values[i].value;
+                if (strcmp(name, "server") == 0)
+                {
+                    if (value->type == json_array)
+                    {
+                        for (j = 0; j < value->u.array.length; j++)
+                        {
+                            if (j >= MAX_REMOTE_NUM) break;
+                            json_value *v = value->u.array.values[j];
+                            parse_addr(to_string(v), (pconf + cnt)->remote_addr + j);
+                            (pconf + cnt)->remote_num = j + 1;
+                        }
+                    }
+                    else if (value->type == json_string)
+                    {
+                        (pconf + cnt)->remote_addr[0].host = to_string(value);
+                        (pconf + cnt)->remote_addr[0].port = NULL;
+                        (pconf + cnt)->remote_num = 1;
+                    }
+                }
+                else if (strcmp(name, "local") == 0)
+                {
+                    (pconf + cnt)->local_addr = to_string(value);
+                }
+                else if (strcmp(name, "local_address") == 0) 
+                {
+                    (pconf + cnt)->local_addr = to_string(value);
+                }
+                else if (strcmp(name, "local_port") == 0)
+                {
+                    (pconf + cnt)->local_port = to_string(value);
+                }
+                else if (strcmp(name, "method") == 0)
+                {
+                    (pconf + cnt)->method = to_string(value);
+                }
+                else if (strcmp(name, "timeout") == 0)
+                {
+                    (pconf + cnt)->timeout = to_string(value);
+                }
+                else if (strcmp(name, "fast_open") == 0)
+                {
+                    (pconf + cnt)->fast_open = value->u.boolean;
+                }
+                else if (strcmp(name, "nofile") == 0)
+                {
+                    (pconf + cnt)->nofile = value->u.integer;
+                }
+                else if (strcmp(name, "port_password") == 0) 
+                {
+                    if(port_num == *num) {
+                        if(value->type == json_object) {
+                            char *pname = value->u.object.values[cnt].name;
+                            json_value *v = value->u.object.values[cnt].value;
+                            (pconf + cnt)->remote_port = ss_strndup(pname, strlen(pname) + 1);
+                            (pconf + cnt)->password = to_string(v);
+                        }
+                    }
+
+                }else if(strcmp(name, "server_port") == 0) {
+                    (pconf + cnt)->remote_port = to_string(value);
+                }else if(strcmp(name, "password") == 0) {
+                    (pconf + cnt)->password = to_string(value);
+                }
+            }
+        }
+
+    }
+    else
+    {
+        FATAL("Invalid config file");
+    }
+
+
+    free(buf);
+    json_value_free(obj);
+    return pconf;
+}
+

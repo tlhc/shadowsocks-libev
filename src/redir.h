@@ -57,6 +57,7 @@ struct server
     struct server_ctx *recv_ctx;
     struct server_ctx *send_ctx;
     struct remote *remote;
+    int idx;
 };
 
 struct remote_ctx

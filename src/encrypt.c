@@ -54,12 +54,13 @@
 
 #define OFFSET_ROL(p, o) ((uint64_t)(*(p + o)) << (8 * o))
 
+#define MAX_ENCS 1024
 static uint8_t *enc_table;
 static uint8_t *dec_table;
-static uint8_t enc_key[MAX_KEY_LENGTH];
-static int enc_key_len;
-static int enc_iv_len;
-static int enc_method;
+static uint8_t enc_key[MAX_ENCS][MAX_KEY_LENGTH];
+static int enc_key_len[MAX_ENCS];
+static int enc_iv_len[MAX_ENCS];
+static int enc_method[MAX_ENCS];
 
 #ifdef DEBUG
 static void dump(char *tag, char *text, int len)
@@ -228,9 +229,9 @@ static void merge_sort(uint8_t array[], int length,
     merge(left, llength, right, middle, salt, key);
 }
 
-int enc_get_iv_len()
+int enc_get_iv_len(int idx)
 {
-    return enc_iv_len;
+    return enc_iv_len[idx];
 }
 
 unsigned char *enc_md5(const unsigned char *d, size_t n, unsigned char *md)
@@ -525,7 +526,7 @@ const digest_type_t *get_digest_type(const char *digest)
 #endif
 }
 
-void cipher_context_init(cipher_ctx_t *ctx, int method, int enc)
+void cipher_context_init(cipher_ctx_t *ctx, int method, int enc, int idx)
 {
     if (method <= TABLE || method >= CIPHER_NUM)
     {
@@ -573,10 +574,10 @@ void cipher_context_init(cipher_ctx_t *ctx, int method, int enc)
         LOGE("Cannot initialize cipher %s", ciphername);
         exit(EXIT_FAILURE);
     }
-    if (!EVP_CIPHER_CTX_set_key_length(evp, enc_key_len))
+    if (!EVP_CIPHER_CTX_set_key_length(evp, enc_key_len[idx]))
     {
         EVP_CIPHER_CTX_cleanup(evp);
-        LOGE("Invalid key length: %d", enc_key_len);
+        LOGE("Invalid key length: %d", enc_key_len[idx]);
         exit(EXIT_FAILURE);
     }
     if (method > RC4_MD5)
@@ -596,7 +597,7 @@ void cipher_context_init(cipher_ctx_t *ctx, int method, int enc)
 #endif
 }
 
-void cipher_context_set_iv(cipher_ctx_t *ctx, uint8_t *iv, size_t iv_len, int enc)
+void cipher_context_set_iv(cipher_ctx_t *ctx, uint8_t *iv, size_t iv_len, int enc, int idx)
 {
     const unsigned char *true_key;
     if (iv == NULL)
@@ -608,17 +609,17 @@ void cipher_context_set_iv(cipher_ctx_t *ctx, uint8_t *iv, size_t iv_len, int en
     {
         rand_bytes(iv, iv_len);
     }
-    if (enc_method == RC4_MD5)
+    if (enc_method[idx] == RC4_MD5)
     {
         unsigned char key_iv[32];
-        memcpy(key_iv, enc_key, 16);
+        memcpy(key_iv, enc_key[idx], 16);
         memcpy(key_iv + 16, iv, 16);
         true_key = enc_md5(key_iv, 32, NULL);
         iv_len = 0;
     }
     else
     {
-        true_key = enc_key;
+        true_key = enc_key[idx];
     }
 
 #ifdef USE_CRYPTO_APPLECC
@@ -626,9 +627,9 @@ void cipher_context_set_iv(cipher_ctx_t *ctx, uint8_t *iv, size_t iv_len, int en
     if (cc->valid == kCCContextValid)
     {
         memcpy(cc->iv, iv, iv_len);
-        memcpy(cc->key, true_key, enc_key_len);
+        memcpy(cc->key, true_key, enc_key_len[idx]);
         cc->iv_len = iv_len;
-        cc->key_len = enc_key_len;
+        cc->key_len = enc_key_len[idx];
         cc->encrypt = enc ? kCCEncrypt : kCCDecrypt;
         if (cc->cryptor != NULL)
         {
@@ -671,7 +672,7 @@ void cipher_context_set_iv(cipher_ctx_t *ctx, uint8_t *iv, size_t iv_len, int en
         FATAL("Cannot set key and IV");
     }
 #elif defined(USE_CRYPTO_POLARSSL)
-    if (cipher_setkey(evp, true_key, enc_key_len * 8, enc) != 0)
+    if (cipher_setkey(evp, true_key, enc_key_len[idx] * 8, enc) != 0)
     {
         cipher_free_ctx(evp);
         FATAL("Cannot set PolarSSL cipher key");
@@ -746,20 +747,20 @@ static int cipher_context_update(cipher_ctx_t *ctx, uint8_t *output, int *olen,
 #endif
 }
 
-char* ss_encrypt_all(int buf_size, char *plaintext, ssize_t *len, int method)
+char* ss_encrypt_all(int buf_size, char *plaintext, ssize_t *len, int method, int idx)
 {
     if (method > TABLE)
     {
         cipher_ctx_t evp;
-        cipher_context_init(&evp, method, 1);
+        cipher_context_init(&evp, method, 1, idx);
 
         int c_len = *len + BLOCK_SIZE;
-        int iv_len = enc_iv_len;
+        int iv_len = enc_iv_len[idx];
         int err = 0;
         char *ciphertext = malloc(max(iv_len + c_len, buf_size));
 
         uint8_t iv[MAX_IV_LENGTH];
-        cipher_context_set_iv(&evp, iv, iv_len, 1);
+        cipher_context_set_iv(&evp, iv, iv_len, 1, idx);
         memcpy(ciphertext, iv, iv_len);
 
         err = cipher_context_update(&evp, (uint8_t*)(ciphertext+iv_len),
@@ -797,7 +798,7 @@ char* ss_encrypt_all(int buf_size, char *plaintext, ssize_t *len, int method)
     }
 }
 
-char* ss_encrypt(int buf_size, char *plaintext, ssize_t *len, struct enc_ctx *ctx)
+char* ss_encrypt(int buf_size, char *plaintext, ssize_t *len, struct enc_ctx *ctx, int idx)
 {
     if (ctx != NULL)
     {
@@ -809,8 +810,8 @@ char* ss_encrypt(int buf_size, char *plaintext, ssize_t *len, struct enc_ctx *ct
         if (!ctx->init)
         {
             uint8_t iv[MAX_IV_LENGTH];
-            iv_len = enc_iv_len;
-            cipher_context_set_iv(&ctx->evp, iv, iv_len, 1);
+            iv_len = enc_iv_len[idx];
+            cipher_context_set_iv(&ctx->evp, iv, iv_len, 1, idx);
             memcpy(ciphertext, iv, iv_len);
             ctx->init = 1;
         }
@@ -845,21 +846,21 @@ char* ss_encrypt(int buf_size, char *plaintext, ssize_t *len, struct enc_ctx *ct
     }
 }
 
-char* ss_decrypt_all(int buf_size, char *ciphertext, ssize_t *len, int method)
+char* ss_decrypt_all(int buf_size, char *ciphertext, ssize_t *len, int method, int idx)
 {
     if (method > TABLE)
     {
         cipher_ctx_t evp;
-        cipher_context_init(&evp, method, 0);
+        cipher_context_init(&evp, method, 0, idx);
 
         int p_len = *len + BLOCK_SIZE;
-        int iv_len = enc_iv_len;
+        int iv_len = enc_iv_len[idx];
         int err = 0;
         char *plaintext = malloc(max(p_len, buf_size));
 
         uint8_t iv[MAX_IV_LENGTH];
         memcpy(iv, ciphertext, iv_len);
-        cipher_context_set_iv(&evp, iv, iv_len, 0);
+        cipher_context_set_iv(&evp, iv, iv_len, 0, idx);
 
         err = cipher_context_update(&evp, (uint8_t*)plaintext, &p_len,
                                     (const uint8_t*)(ciphertext + iv_len), *len - iv_len);
@@ -893,7 +894,7 @@ char* ss_decrypt_all(int buf_size, char *ciphertext, ssize_t *len, int method)
     }
 }
 
-char* ss_decrypt(int buf_size, char *ciphertext, ssize_t *len, struct enc_ctx *ctx)
+char* ss_decrypt(int buf_size, char *ciphertext, ssize_t *len, struct enc_ctx *ctx, int idx)
 {
     if (ctx != NULL)
     {
@@ -905,9 +906,9 @@ char* ss_decrypt(int buf_size, char *ciphertext, ssize_t *len, struct enc_ctx *c
         if (!ctx->init)
         {
             uint8_t iv[MAX_IV_LENGTH];
-            iv_len = enc_iv_len;
+            iv_len = enc_iv_len[idx];
             memcpy(iv, ciphertext, iv_len);
-            cipher_context_set_iv(&ctx->evp, iv, iv_len, 0);
+            cipher_context_set_iv(&ctx->evp, iv, iv_len, 0, idx);
             ctx->init = 1;
         }
 
@@ -942,13 +943,13 @@ char* ss_decrypt(int buf_size, char *ciphertext, ssize_t *len, struct enc_ctx *c
     }
 }
 
-void enc_ctx_init(int method, struct enc_ctx *ctx, int enc)
+void enc_ctx_init(int method, struct enc_ctx *ctx, int enc, int idx)
 {
     memset(ctx, 0, sizeof(struct enc_ctx));
-    cipher_context_init(&ctx->evp, method, enc);
+    cipher_context_init(&ctx->evp, method, enc, idx);
 }
 
-void enc_key_init(int method, const char *pass)
+void enc_key_init(int method, const char *pass, int idx)
 {
     if (method <= TABLE || method >= CIPHER_NUM)
     {
@@ -991,23 +992,23 @@ void enc_key_init(int method, const char *pass)
         FATAL("MD5 Digest not found in crypto library");
     }
 
-    enc_key_len = bytes_to_key(cipher, md, (const uint8_t *) pass, enc_key, iv);
-    if (enc_key_len == 0)
+    enc_key_len[idx] = bytes_to_key(cipher, md, (const uint8_t *) pass, enc_key[idx], iv);
+    if (enc_key_len[idx] == 0)
     {
         FATAL("Cannot generate key and IV");
     }
     if (method == RC4_MD5)
     {
-        enc_iv_len = 16;
+        enc_iv_len[idx] = 16;
     }
     else
     {
-        enc_iv_len = cipher_iv_size(cipher);
+        enc_iv_len[idx] = cipher_iv_size(cipher);
     }
-    enc_method = method;
+    enc_method[idx] = method;
 }
 
-int enc_init(const char *pass, const char *method)
+int enc_init(const char *pass, const char *method, int idx)
 {
     int m = TABLE;
     if (method != NULL)
@@ -1031,7 +1032,7 @@ int enc_init(const char *pass, const char *method)
     }
     else
     {
-        enc_key_init(m, pass);
+        enc_key_init(m, pass, idx);
     }
     return m;
 }

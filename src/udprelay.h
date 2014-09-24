@@ -48,6 +48,7 @@ struct server_ctx
     const char *iface;
     struct cache *conn_cache;
     char *buf; // server send from, remote recv into
+    int idx;
 #ifdef UDPRELAY_REMOTE
     asyncns_t *asyncns;
 #endif
@@ -65,6 +66,7 @@ struct resolve_ctx
 {
     ev_io io;
     asyncns_t *asyncns;
+    int idx;
 };
 
 struct query_ctx

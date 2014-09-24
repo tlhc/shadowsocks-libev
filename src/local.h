@@ -63,6 +63,7 @@ struct server
     struct server_ctx *send_ctx;
     struct listen_ctx *listener;
     struct remote *remote;
+    int idx;
 };
 
 struct remote_ctx
